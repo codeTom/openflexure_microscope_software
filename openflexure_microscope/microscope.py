@@ -17,7 +17,7 @@ picam2_quarter_res = tuple([d/4 for d in picam2_full_res])
 # The dicts below determine the settings that are loaded from, and saved to,
 # the npz settings file.  See extract_settings and load_microscope for details.
 picamera_init_settings = {"lens_shading_table": None, "resolution": tuple}
-picamera_later_settings = {"awb_mode":str, 
+picamera_later_settings = {"awb_mode":str,
                            "awb_gains":tuple,
                            "shutter_speed":"[()]",
                            "analog_gain":"[()]",
@@ -72,12 +72,12 @@ def sharpness_edge(image):
     gray = np.mean(image.astype(float), 2)
     n = 20
     edge = np.array([[-1]*n + [1]*n])
-    return np.sum([np.sum(ndimage.filters.convolve(gray,W)**2) 
+    return np.sum([np.sum(ndimage.filters.convolve(gray,W)**2)
                    for W in [edge, edge.T]])
 @contextmanager
 def set_properties(obj, **kwargs):
     """A context manager to set, then reset, certain properties of an object.
-    
+
     The first argument is the object, subsequent keyword arguments are properties
     of said object, which are set initially, then reset to their previous values.
     """
@@ -113,8 +113,8 @@ class Microscope(object):
         res = round_resolution(self.camera.resolution)
         shape = (res[1], res[0], 3)
         buf = np.empty(np.product(shape), dtype=np.uint8)
-        self.camera.capture(buf, 
-                format='rgb', 
+        self.camera.capture(buf,
+                format='rgb',
                 use_video_port=use_video_port)
         #get an image, see picamera.readthedocs.org/en/latest/recipes2.html
         return buf.reshape(shape)
@@ -122,8 +122,8 @@ class Microscope(object):
     def rgb_image(self, use_video_port=True, resize=None):
         """Capture a frame from a camera and output to a numpy array"""
         with picamera.array.PiRGBArray(self.camera, size=resize) as output:
-            self.camera.capture(output, 
-                    format='rgb', 
+            self.camera.capture(output,
+                    format='rgb',
                     resize=resize,
                     use_video_port=use_video_port)
         #get an image, see picamera.readthedocs.org/en/latest/recipes2.html
@@ -131,7 +131,7 @@ class Microscope(object):
 
     def freeze_camera_settings(self, iso=None, wait_before=2, wait_after=0.5):
         """Turn off as much auto stuff as possible (except lens shading)
-        
+
         NB if the camera was created with load_microscope, this is not necessary.
         """
         if iso is not None:
@@ -149,7 +149,7 @@ class Microscope(object):
         """Perform a simple autofocus routine.
 
         The stage is moved to z positions (relative to current position) in dz,
-        and at each position an image is captured and the sharpness function 
+        and at each position an image is captured and the sharpness function
         evaulated.  We then move back to the position where the sharpness was
         highest.  No interpolation is performed.
 
@@ -163,11 +163,167 @@ class Microscope(object):
                 positions.append(self.stage.position[2])
                 time.sleep(settle)
                 sharpnesses.append(metric_fn(self.rgb_image(
-                            use_video_port=True, 
+                            use_video_port=True,
                             resize=(640,480))))
             newposition = positions[np.argmax(sharpnesses)]
             self.stage.focus_rel(newposition - self.stage.position[2])
             return positions, sharpnesses
+
+
+    def naive_autofocus(self, step_size = 500, thresh = 999999):
+        """
+        IGEM15
+        """
+        def get_score():
+            return np.var(self.rgb_image(
+                            use_video_port=True,
+                            resize=(640,480)))
+
+        print("Is simple better?")
+        prev = get_score()
+
+        self.stage.focus_rel(step_size)
+        time.sleep(1)
+        curr = f.eval_score()
+        print(prev)
+        print(curr)
+
+        if curr > thresh:
+            print("tres focused")
+            return
+
+        # check direction to climb
+        diff = curr - prev
+        direction = 1 if diff > 0 else -1
+
+        # climb in smaller increments until theshold
+        step_thresh = 99
+
+        # for sanity
+        timeout = 100
+        tprogress = 0
+
+        # climb, baby, climb!
+        while step_size > step_thresh:
+            while tprogress < timeout:
+                prev = curr
+                self.stage.focus_rel(direction * step_size)
+                time.sleep(1)
+                curr = f.eval_score()
+                print(curr)
+                if curr > thresh:
+                    print("tres focused")
+                    return
+
+                diff = curr - prev
+                curdir = 1 if diff > 0 else -1
+                direction = curdir * direction
+                if curdir == -1:
+                    print("back back back")
+                    self.stage.focus_rel(direction * step_size)
+                    if thresh == 999999:
+                        thresh = prev#naive_autofocus(f, step_size, prev - 100)
+                        #return
+                    break
+                tprogress = tprogress + 1
+            tprogress = 0
+            step_size = step_size / 2
+
+        print("Done naive hill climb")
+        print("Final score {}".format(curr))
+
+    def autofocus_igem(self, step_size):
+        """
+            Autofocus copied from iGEM15 Cambridge team,
+            https://github.com/sourtin/igem15-sw
+
+            step_size: initial step size
+        """
+        z,f = self.hill_climbing(step_size)
+        #TODO
+
+
+    def hill_climbing(self, step_size):
+        """
+            Autofocus copied from iGEM15 Cambridge team,
+            https://github.com/sourtin/igem15-sw
+
+            step_size: initial step size
+        """
+        score_history = []
+
+        with set_properties(self.stage, backlash=256):
+            """ Climb to a higher place, find a smaller interval containing focus position
+            (z1, z2, z3),(f1, f2, f3) = hill_climbing(f)
+
+            """
+            def get_score():
+                return np.var(self.rgb_image(
+                            use_video_port=True,
+                            resize=(640,480)))
+            global scan_direction
+            print('Starting hill climbing')
+            f1 = get_score()
+            z1 = 0
+            self.stage.focus_rel(step_size)
+            f2 = get_score()
+            z2 = step_size
+            score_history.append(f1)
+            score_history.append(f2)
+            iterations = 0
+
+            while(1):
+                #print(f1,f2)
+                if(f2 > f1):
+                    f0 = f1
+                    f1 = f2
+                    self.stage.focus_rel(step_size)
+                    f2 = get_score()
+                    score_history.append(f2)
+                    z2 += step_size
+                    iterations += 1
+
+                elif(iterations <=1):
+                    #print(iterations, f1, f2)
+                    print('Found a dip, assuming it is wrong and continuing')
+                    f0 = f1
+                    f1 = f2
+                    self.stage.focus_rel(step_size)
+                    f2 = get_score()
+                    score_history.append(f2)
+                    z2 += step_size
+                    iterations +=1
+                elif(iterations <= 2):
+                    print('Changing search direction')
+                    return self.hill_climbing(f, -step_size)
+                else:
+                    print ('Finished hill climbing')
+        return ((z2 - 2 * step_size -2 , z2 - step_size, z2), (f0, f1, f2))
+
+    def test_z_axis_repeatability():
+        """
+            Testing only. TODO: remove (also from iGEM15)
+        """
+        def get_score():
+                return np.var(self.rgb_image(
+                            use_video_port=True,
+                            resize=(640,480)))
+        m = microscope_control()
+        scores = []
+        distance = 500
+        for i in range(50):
+            print('Iteration % d' % i)
+            self.stage.focus_rel(distance)
+            self.stage.focus_rel(-distance)
+            #scores.append(m.move_motor(-distance, 5).eval_score())
+            scores.append(get_score())
+
+
+        plt.plot(range(len(scores)),scores)
+        plt.ylabel('Variance')
+        plt.xlabel('Iteration')
+        plt.title('Focus score varying repeated movements')
+        plt.show()
 
     def acquire_image_stack(self, step_displacement, n_steps, output_dir, raw=False):
         """Scan an edge across the field of view, to measure distortion.
@@ -195,7 +351,7 @@ class Microscope(object):
         with set_properties(self.stage, backlash=256):
             for i in self.stage.scan_linear(scan_points):
                 time.sleep(1)
-                filepath = os.path.join(output_dir,"image_%03d_x%d_y%d_z%d.jpg" % 
+                filepath = os.path.join(output_dir,"image_%03d_x%d_y%d_z%d.jpg" %
                                                    ((i,) + tuple(self.stage.position)))
                 print("capturing {}".format(filepath))
                 self.camera.capture(filepath, use_video_port=False, bayer=raw)
@@ -215,7 +371,7 @@ class Microscope(object):
     @property
     def zoom(self):
         """A scalar property that sets the zoom value of the camera.
-        
+
         camera.zoom is a 4-element field of view specifying the region of the
         sensor that is visible, this is a simple scalar, where 1 means the whole
         FoV is returned and >1 means we zoom in (on the current centre of the
@@ -233,7 +389,7 @@ class Microscope(object):
         centre = np.array([fov[0] + fov[2]/2.0, fov[1] + fov[3]/2.0])
         size = 1.0/newvalue
         # If the new zoom value would be invalid, move the centre to
-        # keep it within the camera's sensor (this is only relevant 
+        # keep it within the camera's sensor (this is only relevant
         # when zooming out, if the FoV is not centred on (0.5, 0.5)
         for i in range(2):
             if np.abs(centre[i] - 0.5) + size/2 > 0.5:
@@ -342,17 +498,17 @@ if __name__ == "__main__":
 
         for step,n in [(1000,10),(200,10),(100,10),(50,10)]:
             dz = (np.arange(n) - (n-1)/2.0) * step
-                
+
             pos, sharps = ms.autofocus(dz, backlash=backlash)
 
-            
+
             plt.plot(pos,sharps,'o-')
 
         plt.xlabel('position (Microsteps)')
         plt.ylabel('Sharpness (a.u.)')
         time.sleep(2)
-        
+
     plt.show()
- 
+
     print("Done :)")
 
