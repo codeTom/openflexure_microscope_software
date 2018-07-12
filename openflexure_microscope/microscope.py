@@ -122,6 +122,7 @@ class Microscope(object):
     def rgb_image(self, use_video_port=True, resize=None):
         """Capture a frame from a camera and output to a numpy array"""
         with picamera.array.PiRGBArray(self.camera, size=resize) as output:
+#            output.truncate(0)
             self.camera.capture(output,
                     format='rgb',
                     resize=resize,
@@ -174,17 +175,12 @@ class Microscope(object):
         """
         IGEM15
         """
-        def get_score():
-            return np.var(self.rgb_image(
-                            use_video_port=True,
-                            resize=(640,480)))
-
         print("Is simple better?")
-        prev = get_score()
+        prev = self.get_score()
 
         self.stage.focus_rel(step_size)
-        time.sleep(1)
-        curr = f.eval_score()
+        time.sleep(0.4)
+        curr = self.get_score()
         print(prev)
         print(curr)
 
@@ -197,7 +193,7 @@ class Microscope(object):
         direction = 1 if diff > 0 else -1
 
         # climb in smaller increments until theshold
-        step_thresh = 99
+        step_thresh = 5
 
         # for sanity
         timeout = 100
@@ -208,8 +204,8 @@ class Microscope(object):
             while tprogress < timeout:
                 prev = curr
                 self.stage.focus_rel(direction * step_size)
-                time.sleep(1)
-                curr = f.eval_score()
+                time.sleep(0.4)
+                curr = self.get_score()
                 print(curr)
                 if curr > thresh:
                     print("tres focused")
@@ -227,10 +223,58 @@ class Microscope(object):
                     break
                 tprogress = tprogress + 1
             tprogress = 0
-            step_size = step_size / 2
+            step_size = step_size / 1.5
 
         print("Done naive hill climb")
         print("Final score {}".format(curr))
+
+    def autofocus_npoint_fine(self, n, step):
+        """
+            Get n points around current positons, with step between them
+            Use a parabolic fit to estimate the optimal position
+            assumes the microscope is in a stable state (takes the first image immediately)
+            return: the relative position, which can then be used to extrapolate approx next location
+        """
+        with set_properties(self.stage, backlash=256):
+            sharpnesses = []
+            positions = []
+            self.camera.annotate_text = ""
+            settle=0.5
+            #check if we scan current position
+            dz=np.linspace(-(n//2)*step,(n//2)*step,n)
+            scanstart=time.time()
+            if n%2 == 1:
+                positions.append(0)
+                sharpnesses.append(self.get_score())
+                dz=np.delete(dz,n//2,0)
+#                print(dz)
+            for i in self.stage.scan_z(dz, return_to_start=False):
+                time.sleep(settle)
+                sharpnesses.append(self.get_score())
+            scanend=time.time()
+            print("scan took: {}".format(scanend-scanstart))
+            # Fit a parabola over these points
+#            print(bestpos)
+#            print(dz)
+            dz=np.insert(dz,0,0,0)
+#           print(sharpnesses)
+            coeffs=np.polyfit(dz,sharpnesses,2)
+            bestpos=-coeffs[1]/(2*coeffs[0])
+#            print(coeffs)
+            if(coeffs[0]>0):
+                print("Something went horribly wrong, try again")
+                if sharpnesses[1]>sharpnesses[n-1]:
+                    self.stage.focus_rel(-2*(n//2)*step) #go to the better endpoint
+                return False
+
+            print("fitting took:{}".format(time.time()-scanend))
+            self.stage.focus_rel(bestpos-dz[n-1])
+#           newposition = positions[np.argmax(sharpnesses)]
+#           self.stage.focus_rel(newposition - self.stage.position[2])
+#           return positions, sharpnesses
+        return bestpos
+
+
 
     def autofocus_igem(self, step_size):
         """
@@ -240,8 +284,33 @@ class Microscope(object):
             step_size: initial step size
         """
         z,f = self.hill_climbing(step_size)
+        #use parabola prediction
+        zb = self.parabola_fitting(z,f)
+        print("hill climb returned:\n")
+        print(z)
+        print(f)
+        self.stage.focus_rel(z[2]-zb)
+        print("Parabola fit:\n")
+        print(zb)
+        print("score: {}".format(self.get_score()))
         #TODO
 
+
+    def parabola_fitting(self, z , f):
+        """Fit the autofocus function data according to the equation 16.5 in the 
+           textbook : 'Microscope Image Processing' by Q.Wu et al'
+           parabola_fitting((z1, z2, z3), (f1, f2 f3))
+           where z1, z2 , z3 are points where the autofocus functions 
+           values f1, f2, f3 are measured
+           Taken from iGEM15
+        """
+        z1 = z[0];z2 = z[1];z3 = z[2];    
+        f1 = f[0];f2 = f[1];f3 = f[2];
+        E = (f2 - f1)/(f3 - f2)
+        if (z3 - z2) == (z2 - z1):
+            return 0.5 * (E * (z3 + z2) - (z2 + z1))/(E - 1)
+        else:
+            return 0.5 * (E * (z3 ** 2 - z2 ** 2) - (z2 ** 2 - z1 ** 2))/(E * (z3 - z2) - (z2 - z1))
 
     def hill_climbing(self, step_size):
         """
@@ -255,18 +324,14 @@ class Microscope(object):
         with set_properties(self.stage, backlash=256):
             """ Climb to a higher place, find a smaller interval containing focus position
             (z1, z2, z3),(f1, f2, f3) = hill_climbing(f)
-
             """
-            def get_score():
-                return np.var(self.rgb_image(
-                            use_video_port=True,
-                            resize=(640,480)))
             global scan_direction
             print('Starting hill climbing')
-            f1 = get_score()
+            f1 = self.get_score()
             z1 = 0
             self.stage.focus_rel(step_size)
-            f2 = get_score()
+            time.sleep(0.4)
+            f2 = self.get_score()
             z2 = step_size
             score_history.append(f1)
             score_history.append(f2)
@@ -278,7 +343,8 @@ class Microscope(object):
                     f0 = f1
                     f1 = f2
                     self.stage.focus_rel(step_size)
-                    f2 = get_score()
+                    time.sleep(0.4)
+                    f2 = self.get_score()
                     score_history.append(f2)
                     z2 += step_size
                     iterations += 1
@@ -289,36 +355,53 @@ class Microscope(object):
                     f0 = f1
                     f1 = f2
                     self.stage.focus_rel(step_size)
-                    f2 = get_score()
+                    time.sleep(0.4)
+                    f2 = self.get_score()
                     score_history.append(f2)
                     z2 += step_size
                     iterations +=1
                 elif(iterations <= 2):
                     print('Changing search direction')
-                    return self.hill_climbing(f, -step_size)
+                    return self.hill_climbing(-step_size)
                 else:
                     print ('Finished hill climbing')
-        return ((z2 - 2 * step_size -2 , z2 - step_size, z2), (f0, f1, f2))
+                    return ((z2 - 2 * step_size -2 , z2 - step_size, z2), (f0, f1, f2))
 
-    def test_z_axis_repeatability():
+    def get_score(self):
+        return sharpness_sum_lap2(self.rgb_image(
+                            use_video_port=True,
+                            resize=(640,480)))
+#        return np.var(self.rgb_image(
+#                            use_video_port=True,
+#                            resize=(640,480)))
+
+    def test_score_repeatability(self):
+        """
+            Tests the stability of the focus score to unavoidable vibrations
+        """
+        sleep_t=0.1
+        scores=[]
+        for i in range(50):
+            score=self.get_score()
+            print("Iteration {}: {}".format(i,score))
+            scores.append(score)
+        return scores
+
+    def test_z_axis_repeatability(self):
         """
             Testing only. TODO: remove (also from iGEM15)
         """
-        def get_score():
-                return np.var(self.rgb_image(
-                            use_video_port=True,
-                            resize=(640,480)))
-        m = microscope_control()
         scores = []
-        distance = 500
+        distance = 800
         for i in range(50):
-            print('Iteration % d' % i)
+            print('Iteration {}'.format(i))
             self.stage.focus_rel(distance)
             self.stage.focus_rel(-distance)
             #scores.append(m.move_motor(-distance, 5).eval_score())
-            scores.append(get_score())
+            scores.append(self.get_score())
 
 
+        print(scores)
         plt.plot(range(len(scores)),scores)
         plt.ylabel('Variance')
         plt.xlabel('Iteration')
