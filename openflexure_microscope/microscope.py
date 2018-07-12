@@ -329,6 +329,20 @@ def load_microscope(npzfile=None, save_settings=False, dummy_stage=True, **kwarg
             ms.save_settings(save_settings)
 
 
+def repeatability_test(self,axis, distance, cycles, outdir):
+        scores = []
+        move=[0,0,0]
+        move_back=[0,0,0]
+        move[axis]=distance
+        move_back[axis]=-distance
+        for i in range(cycles):
+            print('Iteration {}'.format(i))
+            self.stage.move_rel([distance,0,0])
+            self.stage.move_rel([-distance,0,0])
+            time.sleep(0.5)
+            self.camera.capture("{}/img_{}.jpg".format(outdir,i), format="jpeg",bayer=True)
+            
+    
 if __name__ == "__main__":
     with picamera.PiCamera() as camera, \
          OpenFlexureStage("/dev/ttyUSB0") as stage:
