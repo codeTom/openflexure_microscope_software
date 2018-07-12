@@ -250,11 +250,12 @@ class Microscope(object):
         move_back[axis]=-distance
         for i in range(cycles):
             print('Iteration {}'.format(i))
-            self.stage.move_rel([distance,0,0])
-            self.stage.move_rel([-distance,0,0])
-            time.sleep(0.5)
+            self.stage.move_rel(move)
+            time.sleep(2.0)
+            self.stage.move_rel(move_back)
+            time.sleep(2.0)
             self.camera.capture("{}/img_{}.jpg".format(outdir,i), format="jpeg",bayer=True)
- 
+
 def extract_settings(source_dict, converters):
     """Extract a subset of a dictionary of settings.
 
