@@ -163,13 +163,13 @@ class Microscope(object):
                 positions.append(self.stage.position[2])
                 time.sleep(settle)
                 sharpnesses.append(metric_fn(self.rgb_image(
-                            use_video_port=True, 
+                            use_video_port=True,
                             resize=(640,480))))
             newposition = positions[np.argmax(sharpnesses)]
             self.stage.focus_rel(newposition - self.stage.position[2])
             return positions, sharpnesses
 
-    def acquire_image_stack(self, step_displacement, n_steps, output_dir, raw=False):
+    def acquire_image_stack(self, step_displacement, n_steps, output_dir, raw=False, autofocus=True):
         """Scan an edge across the field of view, to measure distortion.
 
         You should start this routine with the edge positioned in the centre of the
@@ -191,11 +191,15 @@ class Microscope(object):
             step_displacement = np.array([0, 0, step_displacement[0]])
         ii = np.arange(n_steps) - (n_steps - 1.0)/2.0 # an array centred on zero
         scan_points = ii[:, np.newaxis] * step_displacement[np.newaxis, :]
-
+        dist=np.linalg.norm(step_displacement)
         with set_properties(self.stage, backlash=256):
             for i in self.stage.scan_linear(scan_points):
+                if autofocus:
+                    if dist > 1000:
+                        self.autofocus(np.linspace(-200,200,11))
+                    self.autofocus(np.linspace(-100,100,11))
                 time.sleep(1)
-                filepath = os.path.join(output_dir,"image_%03d_x%d_y%d_z%d.jpg" % 
+                filepath = os.path.join(output_dir,"image_%03d_x%d_y%d_z%d.jpg" %
                                                    ((i,) + tuple(self.stage.position)))
                 print("capturing {}".format(filepath))
                 self.camera.capture(filepath, use_video_port=False, bayer=raw)

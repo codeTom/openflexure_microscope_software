@@ -201,9 +201,11 @@ def image_stack(ms, raw=False):
         os.mkdir(output_dir)
         step_size = [int(input("{} step size: ".format(ax))) for ax in ['X', 'Y', 'Z']]
         n_steps = int(input("Number of images: "))
+        autofocus = input("Autofocus each step: [Y/n]")
+        autofocus = False if autofocus in "Nn" else True
         ms.camera.start_preview()
         ms.camera.annotate_text = ""
-        ms.acquire_image_stack(step_size, n_steps, output_dir, raw=raw)
+        ms.acquire_image_stack(step_size, n_steps, output_dir, autofocus=autofocus ,raw=raw)
         ms.camera.annotate_text = "Acquired {} images to {}".format(n_steps, output_dir)
         time.sleep(1)
     except Exception as e:
