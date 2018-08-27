@@ -30,7 +30,7 @@ from .microscope import load_microscope
 
 def validate_filepath(filepath):
     """Check the filepath is valid, creating dirs if needed
-    The final format is  ~/Desktop/images/image_%d.img  
+    The final format is  ~/Desktop/images/image_%d.img
     %d is formatted with number by (filepath %n)
     https://pyformat.info/"""
 
@@ -43,12 +43,12 @@ def validate_filepath(filepath):
     elif "%d" not in filepath and ".jp" in filepath:
         'add automatic numbering to filename'
         filepath = filepath.split('.')
-        filepath = filepath[0] + '_%03d.' + filepath[1] 
+        filepath = filepath[0] + '_%03d.' + filepath[1]
         return filepath
-    
+
     elif "%d" in filepath and ".jp" in filepath:
         return filepath
-    
+
     else:
         raise ValueError("Error setting output filepath.  Valid filepaths should"
                          " either be [creatable] directories, or end with a "
@@ -193,6 +193,46 @@ class ReadOnlyObjectParameter(InteractiveParameter):
     def change(self, d):
         pass
 
+def image_grid(ms):
+    ms.camera.stop_preview()
+    try:
+        output_dir = os.path.expanduser(input("Output directory: "))
+        os.mkdir(output_dir)
+        step_size = [int(input("{} step size: ".format(ax))) for ax in ['X', 'Y']]
+        n_steps = [int(input("Number of images in {}:".format(ax))) for ax in ['X','Y']]
+        autofocus = input("Autofocus each step: [Y/n]")
+        autofocus = False if autofocus in "Nn" else True
+        save_raw = input("Save raw data: [Y/n]")
+        save_raw = False if save_raw in "Nn" else True
+        if autofocus:
+            val = input("Autofocus range [100]:")
+            if val == "":
+                autofocus_range = 100
+            else:
+                autofocus_range = int(val)
+
+        #start the scan
+        ms.camera.start_preview()
+        xdir=1
+        for i in range(n_steps[1]):
+            for j in range(n_steps[0]):
+                if autofocus:
+                    ms.autofocus(np.linspace(-autofocus_range//2,autofocus_range//2,11))
+                time.sleep(1)
+                camera.capture(output_dir+"/{}_{}.jpg".format(j,i), format="jpeg", bayer=save_raw)
+                camera.annotate_text="Saved '{}', moving".format(output_dir+"/{}_{}.jpg".format(j,i))
+                #do not move after the last image, we'll move in y
+                if j != n_steps[0]-1:
+                    ms.stage.move_rel([xdir*step_size[0],0,0])
+                    camera.annotate_text=""
+            camera.annotate_text="Moving y"
+            xdir*=-1
+            ms.stage.move_rel([0,step_size[1],0])
+            camera.annotate_text=""
+
+    except Exception as e:
+        print("Error: {}".format(e))
+
 def image_stack(ms, raw=False):
     """Acquire a stack of images, prompting the operator for parameters"""
     ms.camera.stop_preview()
@@ -225,6 +265,7 @@ def control_parameters_from_microscope(microscope):
             FunctionParameter("fine autofocus", microscope.autofocus, [np.linspace(-80,80,11)]),
             FunctionParameter("image stack", image_stack, [microscope]),
             FunctionParameter("image stack [raw]", image_stack, [microscope], {'raw':True}),
+            FunctionParameter("image grid", image_grid, [microscope]),
             InteractiveCameraParameter(cam, "brightness", np.linspace(0,100,11), setter_conversion=int),
             InteractiveCameraParameter(cam, "contrast", np.linspace(-50,50,11), setter_conversion=int),
             InteractiveCameraParameter(microscope, "zoom", 2**np.linspace(0,4,9)),
@@ -314,7 +355,7 @@ def control_microscope_with_keyboard(output="./images", dummy_stage=False, setti
                     filepath = validate_filepath(new_filepath)
                 print("New output filepath: %s\n" % filepath)
 
-    
+
 
 
 if __name__ == '__main__':
