@@ -17,7 +17,7 @@ picam2_quarter_res = tuple([d/4 for d in picam2_full_res])
 # The dicts below determine the settings that are loaded from, and saved to,
 # the npz settings file.  See extract_settings and load_microscope for details.
 picamera_init_settings = {"lens_shading_table": None, "resolution": tuple}
-picamera_later_settings = {"awb_mode":str, 
+picamera_later_settings = {"awb_mode":str,
                            "awb_gains":tuple,
                            "shutter_speed":"[()]",
                            "analog_gain":"[()]",
@@ -25,6 +25,7 @@ picamera_later_settings = {"awb_mode":str,
                            "brightness":"[()]",
                            "contrast":"[()]",
                            }
+stage_settings = {"z_compensation_table": None}
 
 def picamera_supports_lens_shading():
     """Determine whether the picamera module supports lens shading.
@@ -72,12 +73,12 @@ def sharpness_edge(image):
     gray = np.mean(image.astype(float), 2)
     n = 20
     edge = np.array([[-1]*n + [1]*n])
-    return np.sum([np.sum(ndimage.filters.convolve(gray,W)**2) 
+    return np.sum([np.sum(ndimage.filters.convolve(gray,W)**2)
                    for W in [edge, edge.T]])
 @contextmanager
 def set_properties(obj, **kwargs):
     """A context manager to set, then reset, certain properties of an object.
-    
+
     The first argument is the object, subsequent keyword arguments are properties
     of said object, which are set initially, then reset to their previous values.
     """
@@ -102,6 +103,7 @@ class Microscope(object):
         self.camera = camera
         self.stage = stage
         self.stage.backlash = np.zeros(3, dtype=np.int)
+        self.z_compensation_table = False
 
     def close(self):
         """Shut down the microscope hardware."""
@@ -113,8 +115,8 @@ class Microscope(object):
         res = round_resolution(self.camera.resolution)
         shape = (res[1], res[0], 3)
         buf = np.empty(np.product(shape), dtype=np.uint8)
-        self.camera.capture(buf, 
-                format='rgb', 
+        self.camera.capture(buf,
+                format='rgb',
                 use_video_port=use_video_port)
         #get an image, see picamera.readthedocs.org/en/latest/recipes2.html
         return buf.reshape(shape)
@@ -122,8 +124,8 @@ class Microscope(object):
     def rgb_image(self, use_video_port=True, resize=None):
         """Capture a frame from a camera and output to a numpy array"""
         with picamera.array.PiRGBArray(self.camera, size=resize) as output:
-            self.camera.capture(output, 
-                    format='rgb', 
+            self.camera.capture(output,
+                    format='rgb',
                     resize=resize,
                     use_video_port=use_video_port)
         #get an image, see picamera.readthedocs.org/en/latest/recipes2.html
@@ -131,7 +133,7 @@ class Microscope(object):
 
     def freeze_camera_settings(self, iso=None, wait_before=2, wait_after=0.5):
         """Turn off as much auto stuff as possible (except lens shading)
-        
+
         NB if the camera was created with load_microscope, this is not necessary.
         """
         if iso is not None:
@@ -149,7 +151,7 @@ class Microscope(object):
         """Perform a simple autofocus routine.
 
         The stage is moved to z positions (relative to current position) in dz,
-        and at each position an image is captured and the sharpness function 
+        and at each position an image is captured and the sharpness function
         evaulated.  We then move back to the position where the sharpness was
         highest.  No interpolation is performed.
 
@@ -163,7 +165,7 @@ class Microscope(object):
                 positions.append(self.stage.position[2])
                 time.sleep(settle)
                 sharpnesses.append(metric_fn(self.rgb_image(
-                            use_video_port=True, 
+                            use_video_port=True,
                             resize=(640,480))))
             newposition = positions[np.argmax(sharpnesses)]
             self.stage.focus_rel(newposition - self.stage.position[2])
@@ -195,7 +197,7 @@ class Microscope(object):
         with set_properties(self.stage, backlash=256):
             for i in self.stage.scan_linear(scan_points):
                 time.sleep(1)
-                filepath = os.path.join(output_dir,"image_%03d_x%d_y%d_z%d.jpg" % 
+                filepath = os.path.join(output_dir,"image_%03d_x%d_y%d_z%d.jpg" %
                                                    ((i,) + tuple(self.stage.position)))
                 print("capturing {}".format(filepath))
                 self.camera.capture(filepath, use_video_port=False, bayer=raw)
@@ -206,6 +208,8 @@ class Microscope(object):
         settings = {}
         for k in list(picamera_later_settings.keys()) + list(picamera_init_settings.keys()):
             settings[k] = getattr(self.camera, k)
+        for k in list(stage_settings.keys()):
+            settings[k] = getattr(self.stage, k)
         return settings
 
     def save_settings(self, npzfile):
@@ -215,7 +219,7 @@ class Microscope(object):
     @property
     def zoom(self):
         """A scalar property that sets the zoom value of the camera.
-        
+
         camera.zoom is a 4-element field of view specifying the region of the
         sensor that is visible, this is a simple scalar, where 1 means the whole
         FoV is returned and >1 means we zoom in (on the current centre of the
@@ -233,7 +237,7 @@ class Microscope(object):
         centre = np.array([fov[0] + fov[2]/2.0, fov[1] + fov[3]/2.0])
         size = 1.0/newvalue
         # If the new zoom value would be invalid, move the centre to
-        # keep it within the camera's sensor (this is only relevant 
+        # keep it within the camera's sensor (this is only relevant
         # when zooming out, if the FoV is not centred on (0.5, 0.5)
         for i in range(2):
             if np.abs(centre[i] - 0.5) + size/2 > 0.5:
@@ -241,7 +245,6 @@ class Microscope(object):
         print("setting zoom, centre {}, size {}".format(centre, size))
         new_fov = (centre[0] - size/2, centre[1] - size/2, size, size)
         self.camera.zoom = new_fov
-
 
 def extract_settings(source_dict, converters):
     """Extract a subset of a dictionary of settings.
@@ -322,6 +325,11 @@ def load_microscope(npzfile=None, save_settings=False, dummy_stage=True, **kwarg
         ms = Microscope(camera, stage)
         for k, v in extract_settings(settings, picamera_later_settings).items():
             setattr(ms.camera, k, v)
+
+        #stage settings
+        for k, v in extract_settings(settings, stage_settings).items():
+            setattr(ms.stage,k,v)
+
         yield ms # The contents of the with block from which we're called happen here
         if save_settings:
             if save_settings is True:
@@ -342,17 +350,17 @@ if __name__ == "__main__":
 
         for step,n in [(1000,10),(200,10),(100,10),(50,10)]:
             dz = (np.arange(n) - (n-1)/2.0) * step
-                
+
             pos, sharps = ms.autofocus(dz, backlash=backlash)
 
-            
+
             plt.plot(pos,sharps,'o-')
 
         plt.xlabel('position (Microsteps)')
         plt.ylabel('Sharpness (a.u.)')
         time.sleep(2)
-        
+
     plt.show()
- 
+
     print("Done :)")
 
