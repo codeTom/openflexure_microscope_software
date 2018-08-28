@@ -270,7 +270,7 @@ def control_microscope_with_keyboard(output="./images", dummy_stage=False, setti
                 break
             elif c in list(move_keys.keys()):
                 # move the stage with quake-style keys
-                stage.move_rel( np.array(move_keys[c]) * step_param.value)
+                stage.move_rel( np.array(move_keys[c]) * step_param.value, compensate_z=True)
             elif c in ['r', 'f']:
                 step_param.change(1 if c=='r' else -1)
             elif c in ['i', 'o']:

@@ -283,6 +283,7 @@ def extract_settings(source_dict, converters):
 
 class DummyStage():
     position = np.array([0,0,0])
+    z_compensation_table=None
     def move(self, *args, **kwargs):
         pass
     def move_rel(self, *args, **kwargs):
