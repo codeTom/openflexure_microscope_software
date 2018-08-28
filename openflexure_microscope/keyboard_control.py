@@ -219,16 +219,16 @@ def image_grid(ms):
                 if autofocus:
                     ms.autofocus(np.linspace(-autofocus_range//2,autofocus_range//2,11))
                 time.sleep(1)
-                camera.capture(output_dir+"/{}_{}.jpg".format(j,i), format="jpeg", bayer=save_raw)
-                camera.annotate_text="Saved '{}', moving".format(output_dir+"/{}_{}.jpg".format(j,i))
+                ms.camera.capture(output_dir+"/{}_{}.jpg".format(j,i), format="jpeg", bayer=save_raw)
+                ms.camera.annotate_text="Saved '{}', moving".format(output_dir+"/{}_{}.jpg".format(j,i))
                 #do not move after the last image, we'll move in y
                 if j != n_steps[0]-1:
                     ms.stage.move_rel([xdir*step_size[0],0,0])
-                    camera.annotate_text=""
-            camera.annotate_text="Moving y"
+                    ms.camera.annotate_text=""
+            ms.camera.annotate_text="Moving y"
             xdir*=-1
             ms.stage.move_rel([0,step_size[1],0])
-            camera.annotate_text=""
+            ms.camera.annotate_text=""
 
     except Exception as e:
         print("Error: {}".format(e))
