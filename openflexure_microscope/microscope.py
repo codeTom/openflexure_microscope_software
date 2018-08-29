@@ -25,7 +25,9 @@ picamera_later_settings = {"awb_mode":str,
                            "brightness":"[()]",
                            "contrast":"[()]",
                            }
-stage_settings = {"z_compensation_table": None}
+stage_settings = {"z_compensation_table": None,
+                  "z_compensation_method":str,
+                  "z_compensation_params":None}
 
 def picamera_supports_lens_shading():
     """Determine whether the picamera module supports lens shading.
@@ -284,6 +286,8 @@ def extract_settings(source_dict, converters):
 class DummyStage():
     position = np.array([0,0,0])
     z_compensation_table=None
+    z_compensation_method=None
+    z_compensation_params=None
     def move(self, *args, **kwargs):
         pass
     def move_rel(self, *args, **kwargs):
