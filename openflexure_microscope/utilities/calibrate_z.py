@@ -1,4 +1,5 @@
 from __future__ import print_function
+from .. import microscope
 import numpy as np
 import sys
 import time
@@ -27,9 +28,9 @@ def prep_sphere(settings_file):
     points=int(input("Grid points in line:"))
     print("Calibrating on {} points.".format(points*points))
     spacing=maxs//points
-    totalpoints=points*points
+    total=points*points
     done=0
-    with microscope.load_microscope(settings_file) as ms:
+    with microscope.load_microscope(settings_file,dummy_stage=False) as ms:
         data=[]
         xdir=1
         camera = ms.camera
@@ -67,5 +68,5 @@ def prep_sphere(settings_file):
 if __name__ == '__main__':
     if method == "interpolate":
         prep_z_compensation_table(sys.argv[1],sys.argv[2])
-    else if method="sphere":
+    elif method == "sphere":
         prep_sphere(sys.argv[1])
